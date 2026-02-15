@@ -11,10 +11,7 @@ import {
 import { CUSTOM_RULES } from "../rules/custom/index.js";
 
 const require = createRequire(import.meta.url);
-const AXE_SOURCE = readFileSync(
-  require.resolve("axe-core/axe.min.js"),
-  "utf-8",
-);
+const AXE_SCRIPT_PATH = require.resolve("axe-core/axe.min.js");
 
 export type Severity = "error" | "warning" | "info" | "pass";
 
@@ -165,6 +162,8 @@ export async function scanPage(
       waitUntil: cfg.waitUntil,
       timeout: cfg.timeout,
     });
+
+    await page.waitForLoadState("domcontentloaded");
   } else {
     page = pageOrUrl;
   }
@@ -172,18 +171,23 @@ export async function scanPage(
   const url = page.url();
 
   try {
-    await page.evaluate(AXE_SOURCE);
+    await page.waitForTimeout(1000);
+    await page.evaluate(`
+      if (typeof globalThis.__name === 'undefined') {
+        globalThis.__name = function(fn) { return fn; };
+      }
+    `);
+    await page.addScriptTag({ path: AXE_SCRIPT_PATH });
 
-    const axeResults: AxeResults = await page.evaluate(() => {
-      // @ts-expect-error axe is injected via evaluate
-      return window.axe.run(document, {
+    const axeResults: AxeResults = await page.evaluate(`
+      window.axe.run(document, {
         runOnly: {
           type: "tag",
           values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"],
         },
         resultTypes: ["violations", "passes", "incomplete", "inapplicable"],
-      });
-    });
+      })
+    `);
 
     const violations: KwcagViolation[] = [];
     for (const v of axeResults.violations) {

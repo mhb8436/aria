@@ -2,6 +2,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import type { AxeResults, Result as AxeViolation } from "axe-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { type ScanConfig, DEFAULT_SCAN_CONFIG } from "./config.js";
 import {
   KWCAG_ITEMS,
@@ -10,8 +11,11 @@ import {
 } from "../rules/kwcag-map.js";
 import { CUSTOM_RULES } from "../rules/custom/index.js";
 
-const require = createRequire(import.meta.url);
-const AXE_SCRIPT_PATH = require.resolve("axe-core/axe.min.js");
+const __require =
+  typeof require !== "undefined"
+    ? require
+    : createRequire(import.meta.url);
+const AXE_SCRIPT_PATH = __require.resolve("axe-core/axe.min.js");
 
 export type Severity = "error" | "warning" | "info" | "pass";
 

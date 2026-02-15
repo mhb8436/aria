@@ -1,31 +1,46 @@
-.PHONY: build bundle test lint typecheck clean install dev scan crawl package
+.PHONY: build bundle test lint typecheck clean install dev scan crawl package gen-axe bun-build
 
 install:
 	npm install
-	npx playwright install chromium
 
 build:
 	npx tsc
 
-bundle:
+gen-axe:
+	@node -e "\
+		const fs = require('fs'); \
+		const axePath = require.resolve('axe-core/axe.min.js'); \
+		const src = fs.readFileSync(axePath, 'utf-8'); \
+		fs.writeFileSync('src/core/axe-embedded.ts', 'export const AXE_SOURCE = ' + JSON.stringify(src) + ';\n'); \
+		console.log('Generated axe-embedded.ts');"
+
+bundle: gen-axe
 	npx esbuild src/cli/index.ts \
 		--bundle \
 		--platform=node \
 		--target=node20 \
 		--format=cjs \
 		--outfile=dist/aria.cjs \
-		--external:playwright \
-		--external:better-sqlite3 \
+		--external:puppeteer-core \
+		--external:sql.js \
 		--external:exceljs
 	@echo "Bundle: dist/aria.cjs ($(du -h dist/aria.cjs | cut -f1))"
+
+bun-build: gen-axe
+	bun build src/cli/index.ts \
+		--compile \
+		--minify \
+		--target=bun \
+		--outfile=dist/aria
+	@echo "Binary: dist/aria ($(du -h dist/aria | cut -f1))"
+	@echo "Usage: ./dist/aria scan <url>"
 
 package: bundle
 	mkdir -p dist/aria-package
 	cp dist/aria.cjs dist/aria-package/
 	cp scripts/aria.sh dist/aria-package/aria
 	cp package.json dist/aria-package/
-	cd dist/aria-package && npm install --omit=dev --ignore-scripts 2>/dev/null && \
-		npx playwright install chromium
+	cd dist/aria-package && npm install --omit=dev --ignore-scripts 2>/dev/null
 	@echo "Package ready: dist/aria-package/"
 	@echo "Usage: dist/aria-package/aria scan <url>"
 
@@ -57,4 +72,4 @@ typecheck:
 	npx tsc --noEmit
 
 clean:
-	rm -rf dist coverage *.db
+	rm -rf dist coverage *.db src/core/axe-embedded.ts

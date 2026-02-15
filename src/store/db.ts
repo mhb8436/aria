@@ -1,5 +1,6 @@
-import Database from "better-sqlite3";
-import type { ScanResult, KwcagViolation } from "../core/scanner.js";
+import initSqlJs, { type Database } from "sql.js";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import type { ScanResult } from "../core/scanner.js";
 import type { CrawlResult } from "../core/crawler.js";
 
 export interface StoredScan {
@@ -67,28 +68,36 @@ CREATE INDEX IF NOT EXISTS idx_scans_url ON scans(url);
 `;
 
 export class AriaStore {
-  private readonly db: Database.Database;
+  private readonly db: Database;
+  private readonly dbPath: string;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
-    this.db.exec(SCHEMA);
+  private constructor(db: Database, dbPath: string) {
+    this.db = db;
+    this.dbPath = dbPath;
+    this.db.run(SCHEMA);
+  }
+
+  static async create(dbPath: string): Promise<AriaStore> {
+    const SQL = await initSqlJs();
+
+    let db: Database;
+    if (dbPath === ":memory:") {
+      db = new SQL.Database();
+    } else if (existsSync(dbPath)) {
+      const buffer = readFileSync(dbPath);
+      db = new SQL.Database(buffer);
+    } else {
+      db = new SQL.Database();
+    }
+
+    return new AriaStore(db, dbPath);
   }
 
   saveScanResult(result: ScanResult): number {
-    const insertScan = this.db.prepare(`
-      INSERT INTO scans (url, timestamp, duration, compliance_rate, violation_count, pass_count, result_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertViolation = this.db.prepare(`
-      INSERT INTO violations (scan_id, kwcag_id, kwcag_name, severity, rule_id, description, impact, node_count, nodes_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = this.db.transaction(() => {
-      const info = insertScan.run(
+    this.db.run(
+      `INSERT INTO scans (url, timestamp, duration, compliance_rate, violation_count, pass_count, result_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
         result.url,
         result.timestamp,
         result.duration,
@@ -96,12 +105,16 @@ export class AriaStore {
         result.violations.length,
         result.summary.passCount,
         JSON.stringify(result),
-      );
+      ],
+    );
 
-      const scanId = info.lastInsertRowid as number;
+    const scanId = this.lastInsertRowId();
 
-      for (const v of result.violations) {
-        insertViolation.run(
+    for (const v of result.violations) {
+      this.db.run(
+        `INSERT INTO violations (scan_id, kwcag_id, kwcag_name, severity, rule_id, description, impact, node_count, nodes_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
           scanId,
           v.kwcagId,
           v.kwcagName,
@@ -111,83 +124,160 @@ export class AriaStore {
           v.impact,
           v.nodes.length,
           JSON.stringify(v.nodes),
-        );
-      }
+        ],
+      );
+    }
 
-      return scanId;
-    });
-
-    return transaction();
+    this.persist();
+    return scanId;
   }
 
   saveCrawlResult(result: CrawlResult): number {
-    const stmt = this.db.prepare(`
-      INSERT INTO crawls (start_url, timestamp, duration, pages_scanned, total_violations, unique_kwcag_violations, result_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const info = stmt.run(
-      result.startUrl,
-      new Date().toISOString(),
-      result.duration,
-      result.pagesScanned,
-      result.summary.totalViolations,
-      result.summary.uniqueKwcagViolations,
-      JSON.stringify(result),
+    this.db.run(
+      `INSERT INTO crawls (start_url, timestamp, duration, pages_scanned, total_violations, unique_kwcag_violations, result_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        result.startUrl,
+        new Date().toISOString(),
+        result.duration,
+        result.pagesScanned,
+        result.summary.totalViolations,
+        result.summary.uniqueKwcagViolations,
+        JSON.stringify(result),
+      ],
     );
 
-    return info.lastInsertRowid as number;
+    const crawlId = this.lastInsertRowId();
+    this.persist();
+    return crawlId;
   }
 
   getScans(limit = 50): readonly StoredScan[] {
-    return this.db
-      .prepare(
-        `SELECT id, url, timestamp, duration, compliance_rate as complianceRate,
-                violation_count as violationCount, pass_count as passCount
-         FROM scans ORDER BY id DESC LIMIT ?`,
-      )
-      .all(limit) as StoredScan[];
+    const stmt = this.db.prepare(
+      `SELECT id, url, timestamp, duration, compliance_rate as complianceRate,
+              violation_count as violationCount, pass_count as passCount
+       FROM scans ORDER BY id DESC LIMIT ?`,
+    );
+    stmt.bind([limit]);
+
+    const results: StoredScan[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push({
+        id: row.id as number,
+        url: row.url as string,
+        timestamp: row.timestamp as string,
+        duration: row.duration as number,
+        complianceRate: row.complianceRate as number,
+        violationCount: row.violationCount as number,
+        passCount: row.passCount as number,
+      });
+    }
+    stmt.free();
+    return results;
   }
 
   getScanById(id: number): ScanResult | null {
-    const row = this.db
-      .prepare("SELECT result_json FROM scans WHERE id = ?")
-      .get(id) as { result_json: string } | undefined;
+    const stmt = this.db.prepare("SELECT result_json FROM scans WHERE id = ?");
+    stmt.bind([id]);
 
-    return row ? JSON.parse(row.result_json) : null;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      stmt.free();
+      return JSON.parse(row.result_json as string);
+    }
+    stmt.free();
+    return null;
   }
 
   getViolationsByScan(scanId: number): readonly StoredViolation[] {
-    return this.db
-      .prepare(
-        `SELECT id, scan_id as scanId, kwcag_id as kwcagId, kwcag_name as kwcagName,
-                severity, rule_id as ruleId, description, impact,
-                node_count as nodeCount, nodes_json as nodesJson
-         FROM violations WHERE scan_id = ? ORDER BY kwcag_id`,
-      )
-      .all(scanId) as StoredViolation[];
+    const stmt = this.db.prepare(
+      `SELECT id, scan_id as scanId, kwcag_id as kwcagId, kwcag_name as kwcagName,
+              severity, rule_id as ruleId, description, impact,
+              node_count as nodeCount, nodes_json as nodesJson
+       FROM violations WHERE scan_id = ? ORDER BY kwcag_id`,
+    );
+    stmt.bind([scanId]);
+
+    const results: StoredViolation[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push({
+        id: row.id as number,
+        scanId: row.scanId as number,
+        kwcagId: row.kwcagId as string,
+        kwcagName: row.kwcagName as string,
+        severity: row.severity as string,
+        ruleId: row.ruleId as string,
+        description: row.description as string,
+        impact: row.impact as string,
+        nodeCount: row.nodeCount as number,
+        nodesJson: row.nodesJson as string,
+      });
+    }
+    stmt.free();
+    return results;
   }
 
   getViolationsByKwcag(kwcagId: string): readonly StoredViolation[] {
-    return this.db
-      .prepare(
-        `SELECT id, scan_id as scanId, kwcag_id as kwcagId, kwcag_name as kwcagName,
-                severity, rule_id as ruleId, description, impact,
-                node_count as nodeCount, nodes_json as nodesJson
-         FROM violations WHERE kwcag_id = ? ORDER BY scan_id DESC`,
-      )
-      .all(kwcagId) as StoredViolation[];
+    const stmt = this.db.prepare(
+      `SELECT id, scan_id as scanId, kwcag_id as kwcagId, kwcag_name as kwcagName,
+              severity, rule_id as ruleId, description, impact,
+              node_count as nodeCount, nodes_json as nodesJson
+       FROM violations WHERE kwcag_id = ? ORDER BY scan_id DESC`,
+    );
+    stmt.bind([kwcagId]);
+
+    const results: StoredViolation[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      results.push({
+        id: row.id as number,
+        scanId: row.scanId as number,
+        kwcagId: row.kwcagId as string,
+        kwcagName: row.kwcagName as string,
+        severity: row.severity as string,
+        ruleId: row.ruleId as string,
+        description: row.description as string,
+        impact: row.impact as string,
+        nodeCount: row.nodeCount as number,
+        nodesJson: row.nodesJson as string,
+      });
+    }
+    stmt.free();
+    return results;
   }
 
   getCrawlById(id: number): CrawlResult | null {
-    const row = this.db
-      .prepare("SELECT result_json FROM crawls WHERE id = ?")
-      .get(id) as { result_json: string } | undefined;
+    const stmt = this.db.prepare("SELECT result_json FROM crawls WHERE id = ?");
+    stmt.bind([id]);
 
-    return row ? JSON.parse(row.result_json) : null;
+    if (stmt.step()) {
+      const row = stmt.getAsObject() as Record<string, unknown>;
+      stmt.free();
+      return JSON.parse(row.result_json as string);
+    }
+    stmt.free();
+    return null;
   }
 
   close(): void {
+    this.persist();
     this.db.close();
+  }
+
+  private lastInsertRowId(): number {
+    const stmt = this.db.prepare("SELECT last_insert_rowid() as id");
+    stmt.step();
+    const row = stmt.getAsObject() as Record<string, unknown>;
+    stmt.free();
+    return row.id as number;
+  }
+
+  private persist(): void {
+    if (this.dbPath !== ":memory:") {
+      const data = this.db.export();
+      writeFileSync(this.dbPath, Buffer.from(data));
+    }
   }
 }

@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Page } from "puppeteer-core";
 import type { CustomRule, CustomRuleResult } from "./types.js";
 
 export const autoPlayRule: CustomRule = {

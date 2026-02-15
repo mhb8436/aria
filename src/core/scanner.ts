@@ -1,21 +1,29 @@
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "puppeteer-core";
 import type { AxeResults, Result as AxeViolation } from "axe-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { type ScanConfig, DEFAULT_SCAN_CONFIG } from "./config.js";
+import { launchBrowser } from "./browser.js";
 import {
   KWCAG_ITEMS,
   getKwcagByAxeRule,
   getKwcagById,
 } from "../rules/kwcag-map.js";
 import { CUSTOM_RULES } from "../rules/custom/index.js";
+import { AXE_SOURCE as AXE_EMBEDDED } from "./axe-embedded.js";
 
-const __require =
-  typeof require !== "undefined"
-    ? require
-    : createRequire(import.meta.url);
-const AXE_SCRIPT_PATH = __require.resolve("axe-core/axe.min.js");
+const AXE_SOURCE = AXE_EMBEDDED || (() => {
+  try {
+    const __require =
+      typeof require !== "undefined"
+        ? require
+        : createRequire(import.meta.url);
+    const axePath = __require.resolve("axe-core/axe.min.js");
+    return readFileSync(axePath, "utf-8");
+  } catch {
+    return "";
+  }
+})();
 
 export type Severity = "error" | "warning" | "info" | "pass";
 
@@ -153,21 +161,18 @@ export async function scanPage(
   const startTime = Date.now();
 
   if (typeof pageOrUrl === "string") {
-    cfg.url !== "" || (cfg as { url: string }).url;
-    browser = await chromium.launch({ headless: cfg.headless });
-    const context = await browser.newContext({
-      viewport: cfg.viewport,
+    browser = await launchBrowser({
+      headless: cfg.headless,
       locale: cfg.locale,
     });
-    page = await context.newPage();
+    page = await browser.newPage();
+    await page.setViewport(cfg.viewport);
     shouldCloseBrowser = true;
 
     await page.goto(pageOrUrl, {
-      waitUntil: cfg.waitUntil,
+      waitUntil: cfg.waitUntil === "networkidle" ? "networkidle0" : cfg.waitUntil,
       timeout: cfg.timeout,
     });
-
-    await page.waitForLoadState("domcontentloaded");
   } else {
     page = pageOrUrl;
   }
@@ -175,13 +180,15 @@ export async function scanPage(
   const url = page.url();
 
   try {
-    await page.waitForTimeout(1000);
+    await new Promise((r) => setTimeout(r, 1000));
+
     await page.evaluate(`
       if (typeof globalThis.__name === 'undefined') {
         globalThis.__name = function(fn) { return fn; };
       }
     `);
-    await page.addScriptTag({ path: AXE_SCRIPT_PATH });
+
+    await page.addScriptTag({ content: AXE_SOURCE });
 
     const axeResults: AxeResults = await page.evaluate(`
       window.axe.run(document, {
@@ -191,7 +198,7 @@ export async function scanPage(
         },
         resultTypes: ["violations", "passes", "incomplete", "inapplicable"],
       })
-    `);
+    `) as AxeResults;
 
     const violations: KwcagViolation[] = [];
     for (const v of axeResults.violations) {
@@ -267,5 +274,5 @@ export async function scanPage(
 export async function createBrowser(
   headless = true,
 ): Promise<Browser> {
-  return chromium.launch({ headless });
+  return launchBrowser({ headless });
 }

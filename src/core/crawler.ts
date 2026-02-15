@@ -1,5 +1,6 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { Browser, Page } from "puppeteer-core";
 import { type CrawlConfig, DEFAULT_CRAWL_CONFIG } from "./config.js";
+import { launchBrowser } from "./browser.js";
 import { scanPage, type ScanResult } from "./scanner.js";
 
 export interface CrawlResult {
@@ -40,9 +41,8 @@ export async function crawlSite(
   const cfg = { ...DEFAULT_CRAWL_CONFIG, ...config };
   const startTime = Date.now();
 
-  const browser = await chromium.launch({ headless: cfg.headless });
-  const context = await browser.newContext({
-    viewport: cfg.viewport,
+  const browser = await launchBrowser({
+    headless: cfg.headless,
     locale: cfg.locale,
   });
 
@@ -72,10 +72,11 @@ export async function crawlSite(
         });
 
         try {
-          const page = await context.newPage();
+          const page = await browser.newPage();
+          await page.setViewport(cfg.viewport);
           try {
             await page.goto(url, {
-              waitUntil: cfg.waitUntil,
+              waitUntil: cfg.waitUntil === "networkidle" ? "networkidle0" : cfg.waitUntil,
               timeout: cfg.timeout,
             });
 

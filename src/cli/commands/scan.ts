@@ -54,7 +54,7 @@ export function createScanCommand(): Command {
         }
 
         if (options.db) {
-          const store = new AriaStore(options.db);
+          const store = await AriaStore.create(options.db);
           const scanId = store.saveScanResult(result);
           store.close();
           process.stdout.write(`\nStored in DB (scan ID: ${scanId})\n`);

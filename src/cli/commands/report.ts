@@ -20,7 +20,7 @@ export function createReportCommand(): Command {
       const spinner = ora("Generating report...").start();
 
       try {
-        const store = new AriaStore(options.db);
+        const store = await AriaStore.create(options.db);
 
         let scanId: number;
         if (options.scanId) {

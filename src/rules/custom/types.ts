@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Page } from "puppeteer-core";
 import type { Severity } from "../../core/scanner.js";
 
 export interface CustomRuleResult {

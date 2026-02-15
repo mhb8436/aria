@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "puppeteer-core";
+import { launchBrowser } from "../../src/core/browser.js";
 import { skipNavRule } from "../../src/rules/custom/skip-nav.js";
 import { autoPlayRule } from "../../src/rules/custom/auto-play.js";
 import { blinkFlashRule } from "../../src/rules/custom/blink-flash.js";
@@ -44,7 +45,7 @@ describe("Custom Rules", () => {
     const addr = server.address();
     const port = typeof addr === "object" && addr ? addr.port : 0;
     baseUrl = `http://localhost:${port}`;
-    browser = await chromium.launch({ headless: true });
+    browser = await launchBrowser({ headless: true });
   });
 
   afterAll(async () => {
@@ -56,7 +57,8 @@ describe("Custom Rules", () => {
 
   async function loadPage(path: string): Promise<Page> {
     const page = await browser.newPage();
-    await page.goto(`${baseUrl}${path}`);
+    await page.setViewport({ width: 1280, height: 720 });
+    await page.goto(`${baseUrl}${path}`, { waitUntil: "load" });
     return page;
   }
 

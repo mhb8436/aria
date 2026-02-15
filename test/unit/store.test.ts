@@ -49,8 +49,8 @@ function makeMockScanResult(overrides: Partial<ScanResult> = {}): ScanResult {
 describe("AriaStore", () => {
   let store: AriaStore;
 
-  beforeEach(() => {
-    store = new AriaStore(":memory:");
+  beforeEach(async () => {
+    store = await AriaStore.create(":memory:");
   });
 
   afterEach(() => {

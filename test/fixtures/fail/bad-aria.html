@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Bad ARIA Test</title>
+</head>
+<body>
+  <main>
+    <h1>Bad ARIA Usage</h1>
+    <div role="button">Not a real button</div>
+    <div role="checkbox" aria-checked="maybe">Invalid aria value</div>
+    <div role="tablist">
+      <div role="button">Should be tab role</div>
+    </div>
+    <div aria-labelledby="nonexistent">Broken reference</div>
+  </main>
+</body>
+</html>

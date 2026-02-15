@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Duplicate IDs Test</title>
+</head>
+<body>
+  <main>
+    <h1>Duplicate IDs</h1>
+    <div id="label1">Username</div>
+    <input type="text" aria-labelledby="label1">
+    <div id="label1">Email</div>
+    <input type="email" aria-labelledby="label1">
+
+    <div id="desc1">Description for first field</div>
+    <input type="text" aria-describedby="desc1">
+    <div id="desc1">Description for second field</div>
+    <input type="text" aria-describedby="desc1">
+  </main>
+</body>
+</html>

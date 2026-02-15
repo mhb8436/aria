@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Onchange Submit Test</title>
+</head>
+<body>
+  <main>
+    <h1>Auto Submit Form</h1>
+    <form>
+      <select onchange="this.form.submit()">
+        <option>Option 1</option>
+        <option>Option 2</option>
+      </select>
+      <select onchange="location.href='/page?v='+this.value">
+        <option value="1">Page 1</option>
+        <option value="2">Page 2</option>
+      </select>
+    </form>
+  </main>
+</body>
+</html>
